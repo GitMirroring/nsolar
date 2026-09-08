@@ -1,19 +1,23 @@
-.SUFFIXES: .c .o
+.SUFFIXES: .c .x .o
 OUTPUT   = nsolar
 VERS     = 0.0.1
-CC       = cc
+CC       = c99
 DEPS     = guile-3.0 raylib
-CFLAGS   = -O2 -g -std=c11 `pkgconf --cflags $(DEPS)`
-LDFLAGS  = `pkgconf --libs $(DEPS)`
+CFLAGS   = -O2 -g `pkgconf --cflags $(DEPS)`
+LDFLAGS  = `pkgconf --libs $(DEPS)` -lm
 
 CFILES   = src/main.c src/sim.c
 OFILES   = $(CFILES:.c=.o)
+XFILES   = $(CFILES:.c=.x)
+
+.c.x:
+	guile-snarf -o $@ $(CFLAGS) $<
 
 .c.o:
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 all: $(OUTPUT)
-$(OUTPUT): $(OFILES)
+$(OUTPUT): $(XFILES) $(OFILES)
 	$(CC) $(CFLAGS) $(OFILES) $(LDFLAGS) -o $@
 
 install: $(OUTPUT)
