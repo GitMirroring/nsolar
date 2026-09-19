@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <unistd.h>
 
 #include <libguile.h>
 #include <raylib.h>
@@ -9,8 +10,6 @@
 #define PKG_NAME "nsolar v0.0.1"
 
 #define RADIANS(deg) (deg*PI/180.0)
-#define BODY(name, mass, radius, position, velocity, color) \
-sim_add_body(sim, (struct body){name,mass,radius,position,velocity,color})
 
 static Model sphere_model;
 static double elevation = 0.0, azimuth = 0.0, radius = 500.0;
@@ -23,6 +22,7 @@ static Camera3D camera = {
     .projection = CAMERA_PERSPECTIVE,
 };
 
+/* basic camera math to track bodies and turn elevation/azimuth into x/y/z */
 static void update_camera(struct simulation *sim)
 {
     Vector3 tracked_pos;
@@ -78,10 +78,14 @@ static void handle_input(struct simulation *sim)
         fps = !fps;
         break;
     case 'd':
-        azimuth += 20.0;
+        azimuth -= 20.0;
+        if (azimuth < 0.0)
+            azimuth += 360.0;
         break;
     case 'a':
-        azimuth -= 20.0;
+        azimuth += 20.0;
+        if (azimuth > 360.0)
+            azimuth -= 360.0;
         break;
     case 'w':
         elevation += 10.0;
@@ -102,6 +106,38 @@ static void handle_input(struct simulation *sim)
     }
 }
 
+/* "system" scheme libraries are loaded first, and can be overridden.  */
+static void load_guile()
+{
+    char *load_paths[4] = {
+        "/usr/share/nsolar/main.scm",
+        "/usr/local/share/nsolar/main.scm",
+        "./scm/main.scm",
+        getenv("NSOLAR_LOAD"),
+    };
+
+    for (int i = 0; i < 4; i++)
+        if (access(load_paths[i], F_OK) == 0)
+            scm_c_primitive_load(load_paths[i]);
+}
+
+#define NUM_DEFAULT_BODIES 12
+static struct body default_bodies[] = {
+    { "Sol", 1.988e30, 6.955e5, VEC3(0,0,0), VEC3(0,0,0), WHITE },
+    { "Mercury", 3.3e23, 2439, VEC3(0, 0, 5.791e7), VEC3(47.36, 0, 0), LIGHTGRAY },
+    { "Venus", 4.867e24, 6051, VEC3(0, 0, 1.082e8), VEC3(35.02, 0, 0), YELLOW },
+    { "Earth", 5.972e24, 6371, VEC3(0, 0, 1.496e8), VEC3(29.78, 0, 0), SKYBLUE },
+    { "Luna", 7.346e22, 1736, VEC3(-3.84e5, 0, 1.496e8), VEC3(29.78, 0, 1), LIGHTGRAY },
+    { "Mars", 6.417e23, 3389, VEC3(0, 0, 2.279e8), VEC3(24.07, 0, 0), RED },
+    { "Phobos", 1.064e16, 11.1, VEC3(-9376, 0, 2.279e8), VEC3(24.07, 0, 2.14), LIGHTGRAY },
+    { "Deimos", 1.51e15,  6.27, VEC3(-23463, 0, 2.279e8), VEC3(24.07, 0, 1.35), LIGHTGRAY },
+    { "Jupiter", 1.898e27, 69886, VEC3(0, 0, 7.784e8), VEC3(13.06, 0, 0), ORANGE },
+    { "Saturn", 5.683e26, 58232, VEC3(0, 0, 1.433e9), VEC3(9.68, 0, 0), BEIGE },
+    { "Uranus", 8.681e25, 25362, VEC3(0, 0, 2.871e9), VEC3(6.80, 0, 0), BLUE },
+    { "Neptune", 1.024e26, 24633, VEC3(0, 0, 4.5e9), VEC3(5.45, 0, 0), DARKBLUE },
+};
+
+/* inner main required so that guile knows where to gc */
 static void inner_main(void *data, int argc, char **argv)
 {
     /* silence compiler warnings */
@@ -109,8 +145,9 @@ static void inner_main(void *data, int argc, char **argv)
     (void)argc;
     (void)argv;
 
-    /* raylib initialization */
     puts(PKG_NAME);
+
+    /* raylib initialization */
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     SetTraceLogLevel(LOG_NONE);
     InitWindow(800, 600, PKG_NAME);
@@ -120,12 +157,13 @@ static void inner_main(void *data, int argc, char **argv)
 
     struct simulation *render_sim = sim_init(), *sim = sim_init();
 
-    BODY("Sol",1.988e30,6.955e5,VEC3(0,0,0),VEC3(0,0,0),WHITE);
-    BODY("Earth",5.972e24,6371,VEC3(0,0,1.496e8),VEC3(29.78,0,0),SKYBLUE);
-    BODY("Luna",7.346e22,1736,VEC3(-3.84e5,0,1.496e8),VEC3(29.78,0,1),LIGHTGRAY);
-    sim_copy(sim, render_sim);
+    for (int i = 0; i < NUM_DEFAULT_BODIES; i++)
+        sim_add_body(sim, default_bodies[i]);
 
+    sim_copy(sim, render_sim);
     sim->tracking_type = BODY;
+
+    load_guile();
 
     sim_unpause(sim);
 
@@ -148,6 +186,7 @@ static void inner_main(void *data, int argc, char **argv)
             DrawFPS(0, 0);
 
         EndDrawing();
+
         sim_pause(sim);
         sim_copy(sim, render_sim);
         sim_unpause(sim);

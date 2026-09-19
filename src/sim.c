@@ -223,11 +223,8 @@ void sim_copy(struct simulation *sim1, struct simulation *sim2)
     sim2->should_exit = sim1->should_exit;
     sim2->tracked_object = sim1->tracked_object;
 
-    if (sim2->body_count != sim1->body_count)
-        sim2->bodies = realloc(sim2->bodies, bodies_size);
-
-    if (sim2->satellite_count != sim1->satellite_count)
-        sim2->satellites = realloc(sim2->satellites, satellites_size);
+    sim2->bodies = realloc(sim2->bodies, bodies_size);
+    sim2->satellites = realloc(sim2->satellites, satellites_size);
 
     memcpy(sim2->bodies, sim1->bodies, bodies_size);
     memcpy(sim2->satellites, sim1->satellites, satellites_size);
