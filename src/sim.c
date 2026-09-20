@@ -27,13 +27,73 @@
 
 #define GRAVITY 6.6743e-20
 
+#define nth_dbl(vec, pos) scm_to_double(scm_c_vector_ref(vec, pos))
+
+#define scm_type_assert(type, var, index, subr) \
+  SCM_ASSERT_TYPE(scm_is_##type(var), var, index, subr, "Expected " #type)
+
 /* may not always be in <unistd.h> */
 int usleep(unsigned long usec);
 
-/* forward declaration, see bottom of file */
-static void sim_init_guile();
-static bool guile_initialized = false;
-static SCM simulation_type;
+static SCM simulation_type, body_type, satellite_type;
+
+SCM_DEFINE(scm_make_body, "make-body", 5, 0, 0,
+           (SCM name, SCM mass, SCM radius, SCM pos, SCM vel),
+           "Create a new planetary body with the provided attributes")
+{
+    vec3 p, v;
+    struct body *b = scm_gc_malloc(sizeof(*b), "body");
+
+    scm_type_assert(string, name, 0, "make-body");
+    scm_type_assert(real, mass, 1, "make-body");
+    scm_type_assert(real, radius, 2, "make-body");
+    scm_type_assert(vector, pos, 3, "make-body");
+    scm_type_assert(vector, vel, 4, "make-body");
+    /* TODO: make it possible to pass colors to this function */
+
+    p.x = nth_dbl(pos, 0), p.y = nth_dbl(pos, 1), p.z = nth_dbl(pos, 2);
+    v.x = nth_dbl(vel, 0), v.y = nth_dbl(vel, 1), v.z = nth_dbl(vel, 2);
+
+    b->mass = scm_to_double(mass);
+    b->radius = scm_to_double(mass);
+    b->position = p;
+    b->velocity = v;
+
+    /* string juggling to make it GC'd */
+    char *cname = scm_to_locale_string(name);
+    size_t namelen = strlen(cname);
+    b->name = scm_gc_malloc_pointerless(namelen+1, "body name");
+    strcpy(b->name, cname);
+    free(cname);
+
+    return scm_make_foreign_object_1(body_type, b);
+}
+
+SCM_DEFINE(scm_make_satellite, "make-satellite", 5, 0, 0,
+           (SCM name, SCM pos, SCM vel),
+           "Create a new satellite with the provided attributes")
+{
+    vec3 p, v;
+    struct satellite *s = scm_gc_malloc(sizeof(*s), "satellite");
+
+    scm_type_assert(string, name, 0, "make-body");
+    scm_type_assert(vector, pos, 3, "make-body");
+    scm_type_assert(vector, vel, 4, "make-body");
+
+    p.x = nth_dbl(pos, 0), p.y = nth_dbl(pos, 1), p.z = nth_dbl(pos, 2);
+    v.x = nth_dbl(vel, 0), v.y = nth_dbl(vel, 1), v.z = nth_dbl(vel, 2);
+
+    s->position = p;
+    s->velocity = v;
+
+    char *cname = scm_to_locale_string(name);
+    size_t namelen = strlen(cname);
+    s->name = scm_gc_malloc_pointerless(namelen+1, "body name");
+    strcpy(s->name, cname);
+    free(cname);
+
+    return scm_make_foreign_object_1(satellite_type, s);
+}
 
 /* update two bodies using equation for gravitational attraction */
 static void update_bodies(struct body *a, struct body *b, double speed)
@@ -128,10 +188,6 @@ static void *sim_loop(void *sim_struct)
 /* initialize the struct for the simulation and create a new thread */
 struct simulation *sim_init()
 {
-    if (!guile_initialized) {
-        sim_init_guile();
-    }
-
     struct simulation *sim = malloc(sizeof(struct simulation));
     sim->time = 0.0f;
     sim->target = INFINITY;
@@ -152,12 +208,16 @@ struct simulation *sim_init()
     return sim;
 }
 
+SCM scm_from_sim(struct simulation *sim)
+{
+    return scm_make_foreign_object_1(simulation_type, sim);
+}
+
 SCM_DEFINE(scm_sim_init, "sim-init", 0, 0, 0,
            (),
            "Initialize a new simulation.")
 {
-    struct simulation *sim = sim_init();
-    return scm_make_foreign_object_1(simulation_type, sim);
+    return scm_from_sim(sim_init());
 }
 
 /* set a simulation to the initial state */
@@ -246,12 +306,40 @@ void sim_copy(struct simulation *sim1, struct simulation *sim2)
     memcpy(sim2->satellites, sim1->satellites, satellites_size);
 }
 
+SCM_DEFINE(scm_sim_copy, "sim-copy", 2, 0, 0,
+           (SCM sim1_scm, SCM sim2_scm),
+           "Copy the state of the first simulation to the second one.")
+{
+    scm_assert_foreign_object_type(simulation_type, sim1_scm);
+    scm_assert_foreign_object_type(simulation_type, sim1_scm);
+
+    struct simulation *sim1 = scm_foreign_object_ref(sim1_scm, 0);
+    struct simulation *sim2 = scm_foreign_object_ref(sim2_scm, 0);
+
+    sim_copy(sim1, sim2);
+
+    return SCM_UNSPECIFIED;
+}
+
 /* pause and unpause the sim by blocking it on a mutex */
 void sim_pause(struct simulation *sim)
 {
     pthread_mutex_lock(&sim->mutex);
     sim->paused = true;
     pthread_mutex_unlock(&sim->mutex);
+}
+
+SCM_DEFINE(scm_sim_pause, "sim-pause", 1, 0, 0,
+           (SCM sim_scm),
+           "Pause the simulation.")
+{
+    scm_assert_foreign_object_type(simulation_type, sim_scm);
+
+    struct simulation *sim = scm_foreign_object_ref(sim_scm, 0);
+
+    sim_pause(sim);
+
+    return SCM_UNSPECIFIED;
 }
 
 void sim_unpause(struct simulation *sim)
@@ -262,6 +350,19 @@ void sim_unpause(struct simulation *sim)
     pthread_cond_signal(&sim->cond);
 }
 
+SCM_DEFINE(scm_sim_unpause, "sim-unpause", 1, 0, 0,
+           (SCM sim_scm),
+           "Unpause the simulation.")
+{
+    scm_assert_foreign_object_type(simulation_type, sim_scm);
+
+    struct simulation *sim = scm_foreign_object_ref(sim_scm, 0);
+
+    sim_unpause(sim);
+
+    return SCM_UNSPECIFIED;
+}
+
 /* add bodies and satellites to the sim */
 void sim_add_body(struct simulation *sim, struct body body)
 {
@@ -270,7 +371,22 @@ void sim_add_body(struct simulation *sim, struct body body)
     memcpy(&sim->bodies[sim->body_count-1], &body, sizeof(body));
 }
 
-void sim_add_sateliite(struct simulation *sim, struct satellite sat)
+SCM_DEFINE(scm_sim_add_body, "sim-add-body", 1, 0, 0,
+           (SCM sim_scm, SCM body_scm),
+           "Add a body to a simulation.")
+{
+    scm_assert_foreign_object_type(body_type, body_scm);
+    scm_assert_foreign_object_type(simulation_type, sim_scm);
+
+    struct simulation *sim = scm_foreign_object_ref(sim_scm, 0);
+    struct body *body = scm_foreign_object_ref(body_scm, 0);
+
+    sim_add_body(sim, *body);
+
+    return SCM_UNSPECIFIED;
+}
+
+void sim_add_satellite(struct simulation *sim, struct satellite sat)
 {
     sim->satellite_count++;
     sim->satellites = realloc(sim->satellites,
@@ -278,6 +394,22 @@ void sim_add_sateliite(struct simulation *sim, struct satellite sat)
     memcpy(&sim->satellites[sim->satellite_count-1], &sat, sizeof(sat));
 }
 
+SCM_DEFINE(scm_sim_add_satellite, "sim-add-satellite", 1, 0, 0,
+           (SCM sim_scm, SCM satellite_scm),
+           "Add a satellite to a simulation.")
+{
+    scm_assert_foreign_object_type(satellite_type, satellite_scm);
+    scm_assert_foreign_object_type(simulation_type, sim_scm);
+
+    struct simulation *sim = scm_foreign_object_ref(sim_scm, 0);
+    struct satellite *satellite = scm_foreign_object_ref(satellite_scm, 0);
+
+    sim_add_satellite(sim, *satellite);
+
+    return SCM_UNSPECIFIED;
+}
+
+/* increment and decrement the tracked object */
 void sim_increment_tracked(struct simulation *sim)
 {
     if (sim->tracking_type == BODY) {
@@ -289,14 +421,31 @@ void sim_increment_tracked(struct simulation *sim)
     }
 }
 
+SCM_DEFINE(scm_sim_increment_tracked, "sim-increment-tracked", 1, 0, 0,
+           (SCM sim_scm),
+           "Increment the tracked object in a sim.")
+{
+    scm_assert_foreign_object_type(simulation_type, sim_scm);
+    sim_increment_tracked(scm_foreign_object_ref(sim_scm, 0));
+    return SCM_UNSPECIFIED;
+}
+
 void sim_decrement_tracked(struct simulation *sim)
 {
     if (sim->tracked_object > 0)
         sim->tracked_object--;
 }
 
-/* called by sim_init() since that is guaranteed to be called first*/
-static void sim_init_guile()
+SCM_DEFINE(scm_sim_decrement_tracked, "sim-decrement-tracked", 1, 0, 0,
+           (SCM sim_scm),
+           "Decrement the tracked object in a sim.")
+{
+    scm_assert_foreign_object_type(simulation_type, sim_scm);
+    sim_decrement_tracked(scm_foreign_object_ref(sim_scm, 0));
+    return SCM_UNSPECIFIED;
+}
+
+void sim_guile_prep()
 {
     SCM name, slots;
     name = scm_from_utf8_symbol("simulation");
@@ -304,9 +453,17 @@ static void sim_init_guile()
 
     simulation_type = scm_make_foreign_object_type(name, slots, NULL);
 
+    name = scm_from_utf8_symbol("body");
+    slots = scm_list_1(scm_from_utf8_symbol("data"));
+
+    body_type = scm_make_foreign_object_type(name, slots, NULL);
+
+    name = scm_from_utf8_symbol("satellite");
+    slots = scm_list_1(scm_from_utf8_symbol("data"));
+
+    satellite_type = scm_make_foreign_object_type(name, slots, NULL);
+
 #ifndef SCM_MAGIC_SNARFER
 #include "sim.x"
 #endif
-
-    guile_initialized = true;
 }

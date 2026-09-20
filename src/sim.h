@@ -21,6 +21,7 @@
 #include <pthread.h>
 
 #include <raylib.h>
+#include <libguile.h>
 
 #include "vec.h"
 
@@ -60,6 +61,9 @@ struct simulation {
 struct simulation *sim_init();
 void sim_deinit(struct simulation *sim);
 void sim_copy(struct simulation *sim1, struct simulation *sim2);
+
+void sim_guile_prep();
+SCM scm_from_sim(struct simulation *sim);
 
 void sim_pause(struct simulation *sim);
 void sim_unpause(struct simulation *sim);

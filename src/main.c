@@ -38,6 +38,27 @@ static Camera3D camera = {
     .projection = CAMERA_PERSPECTIVE,
 };
 
+/* Each "key override" is stored in corresponding char slot */
+static SCM key_overrides[256];
+
+#define NUM_DEFAULT_BODIES 12
+static struct body default_bodies[NUM_DEFAULT_BODIES] = {
+    { "Sol", 1.988e30, 6.955e5, VEC3(0,0,0), VEC3(0,0,0), WHITE },
+    { "Mercury", 3.3e23, 2439, VEC3(0, 0, 5.791e7), VEC3(47.36, 0, 0), LIGHTGRAY },
+    { "Venus", 4.867e24, 6051, VEC3(0, 0, 1.082e8), VEC3(35.02, 0, 0), YELLOW },
+    { "Earth", 5.972e24, 6371, VEC3(0, 0, 1.496e8), VEC3(29.78, 0, 0), SKYBLUE },
+    { "Luna", 7.346e22, 1736, VEC3(-3.84e5, 0, 1.496e8), VEC3(29.78, 0, 1), LIGHTGRAY },
+    { "Mars", 6.417e23, 3389, VEC3(0, 0, 2.279e8), VEC3(24.07, 0, 0), RED },
+    { "Phobos", 1.064e16, 11.1, VEC3(-9376, 0, 2.279e8), VEC3(24.07, 0, 2.14), LIGHTGRAY },
+    { "Deimos", 1.51e15,  6.27, VEC3(-23463, 0, 2.279e8), VEC3(24.07, 0, 1.35), LIGHTGRAY },
+    { "Jupiter", 1.898e27, 69886, VEC3(0, 0, 7.784e8), VEC3(13.06, 0, 0), ORANGE },
+    { "Saturn", 5.683e26, 58232, VEC3(0, 0, 1.433e9), VEC3(9.68, 0, 0), BEIGE },
+    { "Uranus", 8.681e25, 25362, VEC3(0, 0, 2.871e9), VEC3(6.80, 0, 0), BLUE },
+    { "Neptune", 1.024e26, 24633, VEC3(0, 0, 4.5e9), VEC3(5.45, 0, 0), DARKBLUE },
+};
+
+static struct simulation *render_sim, *sim;
+
 /* basic camera math to track bodies and turn elevation/azimuth into x/y/z */
 static void update_camera(struct simulation *sim)
 {
@@ -76,10 +97,16 @@ static void draw_bodies(struct simulation *sim)
                   sim->bodies[i].color);
 }
 
-/* handle keypress */
 static void handle_input(struct simulation *sim)
 {
-    switch (GetCharPressed()) {
+    char key = GetCharPressed();
+
+    if (key_overrides[key] != SCM_UNSPECIFIED) {
+        scm_call_0(key_overrides[key]);
+        return;
+    }
+
+    switch (key) {
     case '-':
         radius *= 1.2;
         break;
@@ -113,16 +140,10 @@ static void handle_input(struct simulation *sim)
         if (elevation < -89.99)
             elevation = -89.99;
         break;
-    case ',':
-        sim_decrement_tracked(sim);
-        break;
-    case '.':
-        sim_increment_tracked(sim);
-        break;
     }
 }
 
-/* "system" scheme libraries are loaded first, and can be overridden.  */
+/* "system" nsolar libraries are loaded first, and can be overridden.  */
 static void load_guile()
 {
     char *load_paths[4] = {
@@ -137,21 +158,25 @@ static void load_guile()
             scm_c_primitive_load(load_paths[i]);
 }
 
-#define NUM_DEFAULT_BODIES 12
-static struct body default_bodies[] = {
-    { "Sol", 1.988e30, 6.955e5, VEC3(0,0,0), VEC3(0,0,0), WHITE },
-    { "Mercury", 3.3e23, 2439, VEC3(0, 0, 5.791e7), VEC3(47.36, 0, 0), LIGHTGRAY },
-    { "Venus", 4.867e24, 6051, VEC3(0, 0, 1.082e8), VEC3(35.02, 0, 0), YELLOW },
-    { "Earth", 5.972e24, 6371, VEC3(0, 0, 1.496e8), VEC3(29.78, 0, 0), SKYBLUE },
-    { "Luna", 7.346e22, 1736, VEC3(-3.84e5, 0, 1.496e8), VEC3(29.78, 0, 1), LIGHTGRAY },
-    { "Mars", 6.417e23, 3389, VEC3(0, 0, 2.279e8), VEC3(24.07, 0, 0), RED },
-    { "Phobos", 1.064e16, 11.1, VEC3(-9376, 0, 2.279e8), VEC3(24.07, 0, 2.14), LIGHTGRAY },
-    { "Deimos", 1.51e15,  6.27, VEC3(-23463, 0, 2.279e8), VEC3(24.07, 0, 1.35), LIGHTGRAY },
-    { "Jupiter", 1.898e27, 69886, VEC3(0, 0, 7.784e8), VEC3(13.06, 0, 0), ORANGE },
-    { "Saturn", 5.683e26, 58232, VEC3(0, 0, 1.433e9), VEC3(9.68, 0, 0), BEIGE },
-    { "Uranus", 8.681e25, 25362, VEC3(0, 0, 2.871e9), VEC3(6.80, 0, 0), BLUE },
-    { "Neptune", 1.024e26, 24633, VEC3(0, 0, 4.5e9), VEC3(5.45, 0, 0), DARKBLUE },
-};
+SCM_DEFINE(scm_main_sim, "main-sim", 0, 0, 0,
+           (),
+           "Return the main simulation for the program.")
+{
+    return scm_from_sim(sim);
+}
+
+SCM_DEFINE(scm_set_key_override, "set-key-override!", 2, 0, 0,
+           (SCM key, SCM function),
+           "Run function when key is pressed.")
+{
+    SCM_ASSERT(scm_is_string(key), key, 0, "set-key-override!");
+
+    char *cname = scm_to_locale_string(key);
+    key_overrides[cname[0]] = function;
+    free(cname);
+
+    return SCM_UNSPECIFIED;
+}
 
 /* inner main required so that guile knows where to gc */
 static void inner_main(void *data, int argc, char **argv)
@@ -171,14 +196,24 @@ static void inner_main(void *data, int argc, char **argv)
     rlSetClipPlanes(0.01f, 5000.0f);
     sphere_model = LoadModelFromMesh(GenMeshSphere(1.0f, 64, 64));
 
-    struct simulation *render_sim = sim_init(), *sim = sim_init();
+    /* Clear key overrides */
+    for (int i = 0; i < 256; i++)
+        key_overrides[i] = SCM_UNSPECIFIED;
+
+    /* Set up render & actual sims */
+    render_sim = sim_init(), sim = sim_init();
+    sim->tracking_type = BODY;
 
     for (int i = 0; i < NUM_DEFAULT_BODIES; i++)
         sim_add_body(sim, default_bodies[i]);
 
     sim_copy(sim, render_sim);
-    sim->tracking_type = BODY;
 
+#ifndef SCM_MAGIC_SNARFER
+#include "main.x"
+#endif
+
+    sim_guile_prep();
     load_guile();
 
     sim_unpause(sim);
