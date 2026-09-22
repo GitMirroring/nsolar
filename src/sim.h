@@ -54,6 +54,7 @@ struct simulation {
     pthread_t thread;
     pthread_mutex_t mutex;
     pthread_cond_t cond;
+    int pause_counter;
     enum tracking_type tracking_type;
     bool paused, should_exit;
 };

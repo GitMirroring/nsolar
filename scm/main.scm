@@ -14,8 +14,21 @@
 ; You should have received a copy of the GNU General Public License
 ; along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+(define paused #f)
+
+; Switch between planets/satellites
 (set-key-override! "." (lambda () (sim-increment-tracked (main-sim))))
 (set-key-override! "," (lambda () (sim-decrement-tracked (main-sim))))
+
+; Save/load from dump
+(set-key-override! ";" (lambda ()
+			 (sim-pause (main-sim))
+			 (sim-save (main-sim) "sim_state.csv")
+			 (sim-unpause (main-sim))))
+(set-key-override! "'" (lambda ()
+			 (sim-pause (main-sim))
+			 (sim-load (main-sim) "sim_state.csv")
+			 (sim-unpause (main-sim))))
 
 (display "Guile code loaded.\n")
 

@@ -16,6 +16,7 @@
 
 #include "sim.h"
 
+#include <stdio.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -55,7 +56,7 @@ SCM_DEFINE(scm_make_body, "make-body", 5, 0, 0,
     v.x = nth_dbl(vel, 0), v.y = nth_dbl(vel, 1), v.z = nth_dbl(vel, 2);
 
     b->mass = scm_to_double(mass);
-    b->radius = scm_to_double(mass);
+    b->radius = scm_to_double(radius);
     b->position = p;
     b->velocity = v;
 
@@ -198,6 +199,7 @@ struct simulation *sim_init()
     sim->bodies = malloc(0);
     sim->satellites = malloc(0);
     sim->paused = true;
+    sim->pause_counter = 1;
     sim->should_exit = false;
     sim->tracking_type = NONE;
 
@@ -241,6 +243,7 @@ void sim_reset(struct simulation *sim)
     sim->bodies = malloc(0);
     sim->satellites = malloc(0);
     sim->paused = true;
+    sim->pause_counter = 1;
     sim->should_exit = false;
     sim->tracking_type = NONE;
 
@@ -264,7 +267,6 @@ SCM_DEFINE(scm_sim_reset, "sim-reset", 1, 0, 0,
 /* Deinitialize sim and free all tied-up memory */
 void sim_deinit(struct simulation *sim)
 {
-    sim_pause(sim);
     sim->should_exit = true;
     sim_unpause(sim);
 
@@ -311,7 +313,7 @@ SCM_DEFINE(scm_sim_copy, "sim-copy", 2, 0, 0,
            "Copy the state of the first simulation to the second one.")
 {
     scm_assert_foreign_object_type(simulation_type, sim1_scm);
-    scm_assert_foreign_object_type(simulation_type, sim1_scm);
+    scm_assert_foreign_object_type(simulation_type, sim2_scm);
 
     struct simulation *sim1 = scm_foreign_object_ref(sim1_scm, 0);
     struct simulation *sim2 = scm_foreign_object_ref(sim2_scm, 0);
@@ -321,11 +323,163 @@ SCM_DEFINE(scm_sim_copy, "sim-copy", 2, 0, 0,
     return SCM_UNSPECIFIED;
 }
 
+static unsigned int rlcolor_to_uint(Color c)
+{
+    return c.r | c.g << 8 | c.b << 16 | c.a << 24;
+}
+
+static Color uint_to_rlcolor(unsigned int u)
+{
+    return (Color) {
+        u&0xFF,(u>>8)&0xFF,(u>>16)&0xFF,(u>>24)&0xFF
+    };
+}
+
+/* dump sim state to a file in CSV-esque format */
+void sim_save(struct simulation *sim, FILE *f)
+{
+    fprintf(f, "%f,%f,%f,%zu,%zu,%zu\n",
+            sim->time,
+            sim->target,
+            sim->speed,
+            sim->body_count,
+            sim->satellite_count,
+            sim->tracked_object);
+
+    for (int i = 0; i < sim->body_count; i++) {
+        fprintf(f, "\"%s\",%le,%le,(%le,%le,%le),(%le,%le,%le),%d\n",
+                sim->bodies[i].name,
+                sim->bodies[i].mass,
+                sim->bodies[i].radius,
+                sim->bodies[i].position.x,
+                sim->bodies[i].position.y,
+                sim->bodies[i].position.z,
+                sim->bodies[i].velocity.x,
+                sim->bodies[i].velocity.y,
+                sim->bodies[i].velocity.z,
+                rlcolor_to_uint(sim->bodies[i].color));
+    }
+
+    for (int i = 0; i < sim->satellite_count; i++) {
+        fprintf(f, "\"%s\",(%e,%e,%e),(%e,%e,%e)\n",
+                sim->satellites[i].name,
+                sim->satellites[i].position.x,
+                sim->satellites[i].position.y,
+                sim->satellites[i].position.z,
+                sim->satellites[i].velocity.x,
+                sim->satellites[i].velocity.y,
+                sim->satellites[i].velocity.z);
+    }
+}
+
+/* Guile "ports" are too limited for right now; maybe a TODO */
+SCM_DEFINE(scm_sim_save, "sim-save", 2, 0, 0,
+           (SCM sim_scm, SCM fname_scm),
+           "Dump the state of the simulation into passed file name.")
+{
+    scm_assert_foreign_object_type(simulation_type, sim_scm);
+    scm_type_assert(string, fname_scm, 1, "sim-save");
+
+    char *fname = scm_to_locale_string(fname_scm);
+    struct simulation *sim = scm_foreign_object_ref(sim_scm, 0);
+    FILE *f = fopen(fname, "w");
+
+    sim_save(sim, f);
+
+    fclose(f);
+    free(fname);
+
+    return SCM_UNSPECIFIED;
+}
+
+/* free all alloc'd memory, but keep sim for reuse */
+static void sim_free_all(struct simulation *sim)
+{
+    for (int i = 0; i < sim->body_count; i++) {
+        free(sim->bodies[i].name);
+    }
+
+    for (int i = 0; i < sim->satellite_count; i++) {
+        free(sim->satellites[i].name);
+    }
+
+    free(sim->satellites);
+    free(sim->bodies);
+}
+
+/* load from dump into a sim */
+void sim_load(struct simulation *sim, FILE *f)
+{
+    sim_free_all(sim);
+
+    fscanf(f, "%lf,%lf,%lf,%zu,%zu,%zu\n",
+           &sim->time,
+           &sim->target,
+           &sim->speed,
+           &sim->body_count,
+           &sim->satellite_count,
+           &sim->tracked_object);
+
+    sim->bodies = malloc(sim->body_count*sizeof(struct body));
+    sim->satellites = malloc(sim->satellite_count*sizeof(struct satellite));
+
+    for (int i = 0; i < sim->body_count; i++) {
+        unsigned int ui;
+
+        fscanf(f, "\"%m[^\"]\",%le,%le,(%le,%le,%le),(%le,%le,%le),%d\n",
+               &sim->bodies[i].name,
+               &sim->bodies[i].mass,
+               &sim->bodies[i].radius,
+               &sim->bodies[i].position.x,
+               &sim->bodies[i].position.y,
+               &sim->bodies[i].position.z,
+               &sim->bodies[i].velocity.x,
+               &sim->bodies[i].velocity.y,
+               &sim->bodies[i].velocity.z,
+               &ui);
+
+        sim->bodies[i].color = uint_to_rlcolor(ui);
+    }
+
+    for (int i = 0; i < sim->satellite_count; i++) {
+        fscanf(f, "\"%m[^\"]\",(%le,%le,%le),(%le,%le,%le)\n",
+               &sim->satellites[i].name,
+               &sim->satellites[i].position.x,
+               &sim->satellites[i].position.y,
+               &sim->satellites[i].position.z,
+               &sim->satellites[i].velocity.x,
+               &sim->satellites[i].velocity.y,
+               &sim->satellites[i].velocity.z);
+    }
+}
+
+SCM_DEFINE(scm_sim_load, "sim-load", 2, 0, 0,
+           (SCM sim_scm, SCM fname_scm),
+           "Load from file to the passed sim.")
+{
+    scm_assert_foreign_object_type(simulation_type, sim_scm);
+    scm_type_assert(string, fname_scm, 1, "sim-load");
+
+    char *fname = scm_to_locale_string(fname_scm);
+    struct simulation *sim = scm_foreign_object_ref(sim_scm, 0);
+    FILE *f = fopen(fname, "r");
+
+    sim_load(sim, f);
+
+    fclose(f);
+    free(fname);
+
+    return SCM_UNSPECIFIED;
+}
+
 /* pause and unpause the sim by blocking it on a mutex */
 void sim_pause(struct simulation *sim)
 {
     pthread_mutex_lock(&sim->mutex);
-    sim->paused = true;
+
+    if (++sim->pause_counter > 0)
+        sim->paused = true;
+
     pthread_mutex_unlock(&sim->mutex);
 }
 
@@ -345,9 +499,13 @@ SCM_DEFINE(scm_sim_pause, "sim-pause", 1, 0, 0,
 void sim_unpause(struct simulation *sim)
 {
     pthread_mutex_lock(&sim->mutex);
-    sim->paused = false;
-    pthread_mutex_unlock(&sim->mutex);
-    pthread_cond_signal(&sim->cond);
+    if (--sim->pause_counter < 1) {
+        sim->paused = false;
+        pthread_mutex_unlock(&sim->mutex);
+        pthread_cond_signal(&sim->cond);
+    } else {
+        pthread_mutex_unlock(&sim->mutex);
+    }
 }
 
 SCM_DEFINE(scm_sim_unpause, "sim-unpause", 1, 0, 0,
@@ -363,15 +521,26 @@ SCM_DEFINE(scm_sim_unpause, "sim-unpause", 1, 0, 0,
     return SCM_UNSPECIFIED;
 }
 
+/* _POSIX_C_SOURCE < 200809L */
+static char *sim_strdup(char *s)
+{
+    size_t i = strlen(s) + 1;
+    char *m = malloc(i);
+    memcpy(m, s, i);
+    return m;
+}
+
 /* add bodies and satellites to the sim */
 void sim_add_body(struct simulation *sim, struct body body)
 {
-    sim->body_count++;
+
+    size_t i = sim->body_count++;
     sim->bodies = realloc(sim->bodies, sim->body_count*sizeof(struct body));
-    memcpy(&sim->bodies[sim->body_count-1], &body, sizeof(body));
+    memcpy(&sim->bodies[i], &body, sizeof(body));
+    sim->bodies[i].name = sim_strdup(sim->bodies[i].name); /* alloc str */
 }
 
-SCM_DEFINE(scm_sim_add_body, "sim-add-body", 1, 0, 0,
+SCM_DEFINE(scm_sim_add_body, "sim-add-body", 2, 0, 0,
            (SCM sim_scm, SCM body_scm),
            "Add a body to a simulation.")
 {
@@ -388,13 +557,14 @@ SCM_DEFINE(scm_sim_add_body, "sim-add-body", 1, 0, 0,
 
 void sim_add_satellite(struct simulation *sim, struct satellite sat)
 {
-    sim->satellite_count++;
+    size_t i = sim->satellite_count++;
     sim->satellites = realloc(sim->satellites,
                               sim->satellite_count*sizeof(struct satellite));
-    memcpy(&sim->satellites[sim->satellite_count-1], &sat, sizeof(sat));
+    memcpy(&sim->satellites[i], &sat, sizeof(sat));
+    sim->satellites[i].name = sim_strdup(sim->satellites[i].name); /* alloc str */
 }
 
-SCM_DEFINE(scm_sim_add_satellite, "sim-add-satellite", 1, 0, 0,
+SCM_DEFINE(scm_sim_add_satellite, "sim-add-satellite", 2, 0, 0,
            (SCM sim_scm, SCM satellite_scm),
            "Add a satellite to a simulation.")
 {
@@ -418,6 +588,9 @@ void sim_increment_tracked(struct simulation *sim)
     } else if (sim->tracking_type == SATELLITE) {
         if (sim->tracked_object < sim->satellite_count-1)
             sim->tracked_object++;
+    } else if (sim->tracking_type == NONE && sim->body_count > 0) {
+        sim->tracked_object = 0;
+        sim->tracking_type = BODY;
     }
 }
 
