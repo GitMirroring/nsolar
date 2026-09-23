@@ -21,22 +21,10 @@
 #include <raylib.h>
 #include <rlgl.h>
 
+#include "render.h"
 #include "sim.h"
 
 #define PKG_NAME "nsolar v0.0.1"
-
-#define RADIANS(deg) (deg*PI/180.0)
-
-static Model sphere_model;
-static double elevation = 0.0, azimuth = 0.0, radius = 500.0;
-static bool grid = true, fps = false;
-static Camera3D camera = {
-    .position = { 0.0, 0.0, 500.0 },
-    .target   = { 0.0, 0.0, 0.0 },
-    .up       = { 0.0, 1.0, 0.0 },
-    .fovy     = 90.0,
-    .projection = CAMERA_PERSPECTIVE,
-};
 
 /* Each "key override" is stored in corresponding char slot */
 static SCM key_overrides[256];
@@ -58,44 +46,6 @@ static struct body default_bodies[NUM_DEFAULT_BODIES] = {
 };
 
 static struct simulation *render_sim, *sim;
-
-/* basic camera math to track bodies and turn elevation/azimuth into x/y/z */
-static void update_camera(struct simulation *sim)
-{
-    Vector3 tracked_pos;
-
-    switch (sim->tracking_type) {
-    case BODY:
-        tracked_pos =
-            vec3_conv(sim->bodies[sim->tracked_object].position);
-        break;
-    case SATELLITE:
-        tracked_pos =
-            vec3_conv(sim->satellites[sim->tracked_object].position);
-        break;
-    case NONE:
-        tracked_pos = (Vector3) {
-            0.0, 0.0, 0.0
-        };
-        break;
-    }
-
-    double ground = radius*cos(RADIANS(elevation));
-    camera.position.x = tracked_pos.x + ground*cos(RADIANS(azimuth));
-    camera.position.z = tracked_pos.z + ground*sin(RADIANS(azimuth));
-    camera.position.y = tracked_pos.y + radius*sin(RADIANS(elevation));
-    camera.target = tracked_pos;
-}
-
-/* draw each body while in Mode3D for raylib */
-static void draw_bodies(struct simulation *sim)
-{
-    for (int i = 0; i < sim->body_count; i++)
-        DrawModel(sphere_model,
-                  vec3_conv(sim->bodies[i].position),
-                  sim->bodies[i].radius / RENDER_SCALE,
-                  sim->bodies[i].color);
-}
 
 static void handle_input(struct simulation *sim)
 {
@@ -220,23 +170,8 @@ static void inner_main(void *data, int argc, char **argv)
 
     while (!WindowShouldClose()) {
         handle_input(sim);
-        update_camera(render_sim);
 
-        BeginDrawing();
-        ClearBackground(BLACK);
-
-        BeginMode3D(camera);
-        draw_bodies(render_sim);
-
-        if (grid)
-            DrawGrid(20.0f, 50.0f);
-
-        EndMode3D();
-
-        if (fps)
-            DrawFPS(0, 0);
-
-        EndDrawing();
+        render(render_sim);
 
         sim_pause(sim);
         sim_copy(sim, render_sim);

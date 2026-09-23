@@ -464,9 +464,15 @@ SCM_DEFINE(scm_sim_load, "sim-load", 2, 0, 0,
     struct simulation *sim = scm_foreign_object_ref(sim_scm, 0);
     FILE *f = fopen(fname, "r");
 
-    sim_load(sim, f);
 
-    fclose(f);
+    if (f != NULL) {
+        sim_load(sim, f);
+        fclose(f);
+    } else {
+        printf("Unable to load file \"%s\".\n", fname);
+    }
+
+
     free(fname);
 
     return SCM_UNSPECIFIED;

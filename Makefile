@@ -23,7 +23,7 @@ CFLAGS   = -O2 -g `pkgconf --cflags $(DEPS)`
 LDFLAGS  = `pkgconf --libs $(DEPS)` -lm
 
 SCMFILES = scm/main.scm
-CFILES   = src/main.c src/sim.c
+CFILES   = src/main.c src/sim.c src/render.c
 HFILES   = src/vec.h src/sim.h
 OFILES   = $(CFILES:.c=.o)
 XFILES   = $(CFILES:.c=.x)
