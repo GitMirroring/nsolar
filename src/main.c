@@ -19,7 +19,6 @@
 
 #include <libguile.h>
 #include <raylib.h>
-#include <rlgl.h>
 
 #include "render.h"
 #include "sim.h"
@@ -143,7 +142,6 @@ static void inner_main(void *data, int argc, char **argv)
     SetTraceLogLevel(LOG_NONE);
     InitWindow(800, 600, PKG_NAME);
     SetTargetFPS(60);
-    rlSetClipPlanes(0.01f, 5000.0f);
     sphere_model = LoadModelFromMesh(GenMeshSphere(1.0f, 64, 64));
 
     /* Clear key overrides */

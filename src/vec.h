@@ -21,7 +21,6 @@
 
 #include <raylib.h>
 
-#define RENDER_SCALE (6.957e5)
 #define VEC3(x, y, z) ((vec3){x,y,z})
 
 typedef struct {
@@ -69,12 +68,6 @@ static inline Vector3 vec3_cast(vec3 a)
     return (Vector3) {
         a.x, a.y, a.z
     };
-}
-
-/* convert to a Vector3 and scale down for rendering */
-static inline Vector3 vec3_conv(vec3 a)
-{
-    return vec3_cast(vec3_div(a, RENDER_SCALE));
 }
 
 #endif /* NSOLAR_VEC_H_ */

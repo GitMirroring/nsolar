@@ -16,15 +16,19 @@
 
 #include <stdbool.h>
 #include <raylib.h>
+#include <rlgl.h>
 
 #include "sim.h"
 #include "vec.h"
 
 #define RADIANS(deg) (deg*PI/180.0)
 
-double elevation = 0.0, azimuth = 0.0, radius = 500.0;
+double elevation = 0.0, azimuth = 0.0, radius = 50.0;
 bool grid = true, fps = false;
 Model sphere_model;
+
+static double render_scale = 6.957e5;
+static vec3 render_offset;
 
 static Camera3D camera = {
     .position = { 0.0, 0.0, 500.0 },
@@ -37,38 +41,80 @@ static Camera3D camera = {
 /* basic camera math to track bodies and turn elevation/azimuth into x/y/z */
 static void update_camera(struct simulation *sim)
 {
-    Vector3 tracked_pos;
-
-    switch (sim->tracking_type) {
-    case BODY:
-        tracked_pos =
-            vec3_conv(sim->bodies[sim->tracked_object].position);
-        break;
-    case SATELLITE:
-        tracked_pos =
-            vec3_conv(sim->satellites[sim->tracked_object].position);
-        break;
-    case NONE:
-        tracked_pos = (Vector3) {
-            0.0, 0.0, 0.0
-        };
-        break;
-    }
-
     double ground = radius*cos(RADIANS(elevation));
-    camera.position.x = tracked_pos.x + ground*cos(RADIANS(azimuth));
-    camera.position.z = tracked_pos.z + ground*sin(RADIANS(azimuth));
-    camera.position.y = tracked_pos.y + radius*sin(RADIANS(elevation));
-    camera.target = tracked_pos;
+    camera.position.x = ground*cos(RADIANS(azimuth));
+    camera.position.z = ground*sin(RADIANS(azimuth));
+    camera.position.y = radius*sin(RADIANS(elevation));
+}
+
+/* convert to a Vector3 and scale down for rendering */
+static Vector3 vec3_conv(vec3 a)
+{
+    return vec3_cast(vec3_div(a, render_scale));
+}
+
+static void grid_vertex(vec3 p) {
+    Vector3 v = vec3_conv(p);
+    rlVertex3f(v.x, v.y, v.z);
+}
+
+/* Reference plane relative to sim 0, 0, 0
+   Adapted from raylib/src/rmodels.c */
+static void reference_plane()
+{
+    int half = 100;
+    double extent = half*2e7;
+
+    rlBegin(RL_LINES);
+    for (int i = -half; i < half; i++) {
+	double s = i * 2e7;
+
+	rlColor3f(0.75f, 0.75f, 0.75f);
+
+	grid_vertex(vec3_sub(VEC3(s, 0.0f, -extent), render_offset));
+	grid_vertex(vec3_sub(VEC3(s, 0.0f, extent), render_offset));
+
+	grid_vertex(vec3_sub(VEC3(-extent, 0.0f, s), render_offset));
+	grid_vertex(vec3_sub(VEC3(extent, 0.0f, s), render_offset));
+    }
+    rlEnd();
+
 }
 
 /* draw each body while in Mode3D for raylib */
 static void draw_bodies(struct simulation *sim)
 {
+    render_offset = VEC3(0,0,0);
+
+    if (sim->tracking_type == BODY) {
+        render_offset = sim->bodies[sim->tracked_object].position;
+        render_scale = sim->bodies[sim->tracked_object].radius;
+    } else if (sim->tracking_type == SATELLITE) {
+        render_offset = sim->satellites[sim->tracked_object].position;
+        render_scale = 16.0;
+    } else {
+        render_scale = 6.957e5;
+    }
+
+    /* update clip planes */
+    double far = 0.0;
+
+    for (int i = 0; i < sim->body_count; i++) {
+        double d = vec3_len(vec3_sub(sim->bodies[i].position, render_offset))
+                   / render_scale;
+        if (d > far)
+            far = d;
+    }
+
+    rlSetClipPlanes(0.01*radius, 1.1*(far+radius));
+
+    if (grid)
+        reference_plane();
+
     for (int i = 0; i < sim->body_count; i++)
         DrawModel(sphere_model,
-                  vec3_conv(sim->bodies[i].position),
-                  sim->bodies[i].radius / RENDER_SCALE,
+                  vec3_conv(vec3_sub(sim->bodies[i].position, render_offset)),
+                  sim->bodies[i].radius / render_scale,
                   sim->bodies[i].color);
 }
 
@@ -81,9 +127,6 @@ void render(struct simulation *sim)
 
     BeginMode3D(camera);
     draw_bodies(sim);
-
-    if (grid)
-        DrawGrid(20.0f, 50.0f);
 
     EndMode3D();
 
