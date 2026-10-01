@@ -25,8 +25,6 @@
 
 #include "../config.h"
 
-#define PKG_NAME "nsolar v0.0.1"
-
 /* Each "key override" is stored in corresponding char slot */
 static SCM key_overrides[256];
 
