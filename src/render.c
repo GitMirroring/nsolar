@@ -21,6 +21,8 @@
 #include "sim.h"
 #include "vec.h"
 
+#include "../config.h"
+
 #define RADIANS(deg) (deg*PI/180.0)
 
 double elevation = 0.0, azimuth = 0.0, radius = 50.0;
@@ -64,7 +66,7 @@ static Camera3D camera = {
     .position = { 0.0, 0.0, 500.0 },
     .target   = { 0.0, 0.0, 0.0 },
     .up       = { 0.0, 1.0, 0.0 },
-    .fovy     = 90.0,
+    .fovy     = 70.0,
     .projection = CAMERA_PERSPECTIVE,
 };
 
@@ -187,7 +189,7 @@ void render_init()
     /* raylib initialization */
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     SetTraceLogLevel(LOG_WARNING);
-    InitWindow(800, 600, "nsolar v0.0.1");
+    InitWindow(800, 600, REL_NAME);
     SetTargetFPS(60);
     sphere_model = LoadModelFromMesh(GenMeshSphere(1.0f, 64, 64));
 

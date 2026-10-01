@@ -23,6 +23,8 @@
 #include "render.h"
 #include "sim.h"
 
+#include "../config.h"
+
 #define PKG_NAME "nsolar v0.0.1"
 
 /* Each "key override" is stored in corresponding char slot */
@@ -135,7 +137,7 @@ static void inner_main(void *data, int argc, char **argv)
     (void)argc;
     (void)argv;
 
-    puts(PKG_NAME);
+    puts(REL_NAME);
 
     render_init();
 
