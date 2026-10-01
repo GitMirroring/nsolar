@@ -25,8 +25,9 @@
 
 extern double elevation, azimuth, radius;
 extern bool grid, fps;
-extern Model sphere_model;
 
 void render(struct simulation *sim);
 
+void render_init();
+void render_deinit();
 #endif

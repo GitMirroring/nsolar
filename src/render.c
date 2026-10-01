@@ -25,11 +25,41 @@
 
 double elevation = 0.0, azimuth = 0.0, radius = 50.0;
 bool grid = true, fps = false;
-Model sphere_model;
 
+#define GLSL(...) "#version 100\n" #__VA_ARGS__
+
+static const char *vertex_shader =
+    GLSL(
+        attribute vec3 vertexPosition;
+        attribute vec3 vertexNormal;
+        uniform mat4 mvp;
+        uniform mat4 matNormal;
+        varying vec3 fragNormal;
+        void main()
+{
+    fragNormal = vec3(matNormal * vec4(vertexNormal, 0.0));
+    gl_Position = mvp * vec4(vertexPosition, 1.0);
+});
+
+static const char *fragment_shader =
+    GLSL(
+        precision mediump float;
+        varying vec3 fragNormal;
+        uniform vec4 colDiffuse;
+        uniform vec3 lightDir;
+        void main()
+{
+    vec3 albedo = pow(colDiffuse.rgb, vec3(2.2));
+    float d = max(dot(normalize(fragNormal), lightDir), 0.0);
+    vec3 lit = albedo * (0.03 + (0.97) * d);
+    gl_FragColor = vec4(pow(lit, vec3(1.0/2.2)), colDiffuse.a);
+});
+
+static Model sphere_model;
+static Shader lit_shader, unlit_shader;
+static int light_dir_loc;
 static double render_scale = 6.957e5;
 static vec3 render_offset;
-
 static Camera3D camera = {
     .position = { 0.0, 0.0, 500.0 },
     .target   = { 0.0, 0.0, 0.0 },
@@ -53,7 +83,8 @@ static Vector3 vec3_conv(vec3 a)
     return vec3_cast(vec3_div(a, render_scale));
 }
 
-static void grid_vertex(vec3 p) {
+static void grid_vertex(vec3 p)
+{
     Vector3 v = vec3_conv(p);
     rlVertex3f(v.x, v.y, v.z);
 }
@@ -67,15 +98,15 @@ static void reference_plane()
 
     rlBegin(RL_LINES);
     for (int i = -half; i < half; i++) {
-	double s = i * 2e7;
+        double s = i * 2e7;
 
-	rlColor3f(0.75f, 0.75f, 0.75f);
+        rlColor3f(0.75f, 0.75f, 0.75f);
 
-	grid_vertex(vec3_sub(VEC3(s, 0.0f, -extent), render_offset));
-	grid_vertex(vec3_sub(VEC3(s, 0.0f, extent), render_offset));
+        grid_vertex(vec3_sub(VEC3(s, 0.0f, -extent), render_offset));
+        grid_vertex(vec3_sub(VEC3(s, 0.0f, extent), render_offset));
 
-	grid_vertex(vec3_sub(VEC3(-extent, 0.0f, s), render_offset));
-	grid_vertex(vec3_sub(VEC3(extent, 0.0f, s), render_offset));
+        grid_vertex(vec3_sub(VEC3(-extent, 0.0f, s), render_offset));
+        grid_vertex(vec3_sub(VEC3(extent, 0.0f, s), render_offset));
     }
     rlEnd();
 
@@ -111,11 +142,26 @@ static void draw_bodies(struct simulation *sim)
     if (grid)
         reference_plane();
 
-    for (int i = 0; i < sim->body_count; i++)
+    vec3 sun = sim->bodies[0].position;
+
+    for (int i = 0; i < sim->body_count; i++) {
+        if (i == 0) {
+            sphere_model.materials[0].shader = unlit_shader;
+        } else {
+            Vector3 l = vec3_cast(vec3_norm(vec3_sub(sun,
+                sim->bodies[i].position)));
+
+            SetShaderValue(lit_shader, light_dir_loc, &l, SHADER_UNIFORM_VEC3);
+            sphere_model.materials[0].shader = lit_shader;
+        }
+
         DrawModel(sphere_model,
                   vec3_conv(vec3_sub(sim->bodies[i].position, render_offset)),
                   sim->bodies[i].radius / render_scale,
                   sim->bodies[i].color);
+    }
+
+    sphere_model.materials[0].shader = unlit_shader;
 }
 
 void render(struct simulation *sim)
@@ -134,4 +180,29 @@ void render(struct simulation *sim)
         DrawFPS(0, 0);
 
     EndDrawing();
+}
+
+void render_init()
+{
+    /* raylib initialization */
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+    SetTraceLogLevel(LOG_WARNING);
+    InitWindow(800, 600, "nsolar v0.0.1");
+    SetTargetFPS(60);
+    sphere_model = LoadModelFromMesh(GenMeshSphere(1.0f, 64, 64));
+
+    /* shader init */
+    unlit_shader = sphere_model.materials[0].shader;
+    lit_shader = LoadShaderFromMemory(vertex_shader, fragment_shader);
+    light_dir_loc = GetShaderLocation(lit_shader, "lightDir");
+}
+
+void render_deinit()
+{
+    /* graceful exit */
+    sphere_model.materials[0].shader = unlit_shader;
+    UnloadShader(lit_shader);
+
+    UnloadModel(sphere_model);
+    CloseWindow();
 }

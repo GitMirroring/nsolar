@@ -137,12 +137,7 @@ static void inner_main(void *data, int argc, char **argv)
 
     puts(PKG_NAME);
 
-    /* raylib initialization */
-    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-    SetTraceLogLevel(LOG_NONE);
-    InitWindow(800, 600, PKG_NAME);
-    SetTargetFPS(60);
-    sphere_model = LoadModelFromMesh(GenMeshSphere(1.0f, 64, 64));
+    render_init();
 
     /* Clear key overrides */
     for (int i = 0; i < 256; i++)
@@ -178,9 +173,7 @@ static void inner_main(void *data, int argc, char **argv)
 
     sim_deinit(sim);
 
-    /* graceful exit */
-    UnloadModel(sphere_model);
-    CloseWindow();
+    render_deinit();
 }
 
 int main(int argc, char **argv)

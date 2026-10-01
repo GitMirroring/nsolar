@@ -14,8 +14,6 @@
 ; You should have received a copy of the GNU General Public License
 ; along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-(define paused #f)
-
 ; Switch between planets/satellites
 (set-key-override! "." (lambda () (sim-increment-tracked (main-sim))))
 (set-key-override! "," (lambda () (sim-decrement-tracked (main-sim))))
